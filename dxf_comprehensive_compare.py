@@ -539,17 +539,91 @@ class DXFComprehensiveComparator:
         else:
             return val1 == val2
 
+    def _format_value_for_display(self, value: Any) -> str:
+        """Format a value for readable display"""
+        if isinstance(value, (tuple, list)):
+            if len(value) == 2:
+                return f"({value[0]:.3f}, {value[1]:.3f})"
+            elif len(value) == 3:
+                return f"({value[0]:.3f}, {value[1]:.3f}, {value[2]:.3f})"
+            else:
+                return str(value)
+        elif isinstance(value, float):
+            return f"{value:.3f}"
+        elif isinstance(value, str):
+            # Truncate very long strings
+            if len(value) > 50:
+                return f"{value[:47]}..."
+            return value
+        else:
+            return str(value)
+
+    def _format_entity_details(self, entity: EntityInfo) -> str:
+        """Format entity-specific details for display"""
+        details = []
+
+        if entity.entity_type == "TEXT":
+            text = entity.properties.get("text", "")
+            height = entity.properties.get("height", 0)
+            if text:
+                text_display = text[:30] + "..." if len(text) > 30 else text
+                details.append(f'Text: "{text_display}"')
+            if height:
+                details.append(f"Height: {height:.3f}")
+
+        elif entity.entity_type == "MTEXT":
+            text = entity.properties.get("text", "")
+            height = entity.properties.get("height", 0)
+            if text:
+                text_display = text[:30] + "..." if len(text) > 30 else text
+                details.append(f'Text: "{text_display}"')
+            if height:
+                details.append(f"Height: {height:.3f}")
+
+        elif entity.entity_type == "LINE":
+            start = entity.properties.get("start")
+            end = entity.properties.get("end")
+            if start and end:
+                details.append(f"From {self._format_value_for_display(start)}")
+                details.append(f"To {self._format_value_for_display(end)}")
+
+        elif entity.entity_type == "CIRCLE":
+            radius = entity.properties.get("radius")
+            center = entity.properties.get("center")
+            if radius:
+                details.append(f"Radius: {radius:.3f}")
+            if center:
+                center_str = self._format_value_for_display(center)
+                details.append(f"Center: {center_str}")
+
+        elif entity.entity_type == "ARC":
+            radius = entity.properties.get("radius")
+            start_angle = entity.properties.get("start_angle")
+            end_angle = entity.properties.get("end_angle")
+            if radius:
+                details.append(f"Radius: {radius:.3f}")
+            if start_angle is not None and end_angle is not None:
+                angle_str = f"{start_angle:.1f}° to {end_angle:.1f}°"
+                details.append(f"Angles: {angle_str}")
+
+        elif entity.entity_type == "INSERT":
+            name = entity.properties.get("name")
+            if name:
+                details.append(f'Block: "{name}"')
+
+        return ", ".join(details) if details else ""
+
     def print_results(self, results: Dict, file1_name: str, file2_name: str):
-        """Print comparison results in a formatted way"""
-        print("\n" + "=" * 80)
+        """Print detailed comparison results showing exact changes"""
+        print("\n" + "=" * 90)
         print("DXF COMPREHENSIVE COMPARISON RESULTS")
         print("(Excluding Text Orientation Changes)")
-        print("=" * 80)
-        print(f"File 1: {file1_name}")
-        print(f"File 2: {file2_name}")
-        print(f"Position tolerance: ±{self.position_tolerance}")
-        print(f"Numeric tolerance: ±{self.numeric_tolerance}")
-        print("-" * 80)
+        print("=" * 90)
+        print(f"📁 File 1 (Original): {file1_name}")
+        print(f"📁 File 2 (Revised):  {file2_name}")
+        print(f"⚙️  Position tolerance: ±{self.position_tolerance}")
+        print(f"⚙️  Numeric tolerance: ±{self.numeric_tolerance}")
+        print("-" * 90)
 
         total_changes = (
             len(results["property_changes"])
@@ -561,58 +635,142 @@ class DXFComprehensiveComparator:
         if total_changes == 0:
             print("✅ NO CHANGES DETECTED (excluding text orientation)")
         else:
-            print(f"⚠️  FOUND {total_changes} CHANGES:")
+            print(f"⚠️  FOUND {total_changes} TOTAL CHANGES:")
             print()
 
-            # Property changes
+            # Show detailed summary first
             if results["property_changes"]:
-                print(f"📝 PROPERTY CHANGES ({len(results['property_changes'])}):")
+                count = len(results["property_changes"])
+                print(f"   📝 {count} entities modified")
+            if results["new_entities"]:
+                count = len(results["new_entities"])
+                print(f"   ➕ {count} entities added")
+            if results["deleted_entities"]:
+                count = len(results["deleted_entities"])
+                print(f"   ➖ {count} entities deleted")
+            print()
+
+            # 1. DELETED ENTITIES (what was removed from original)
+            if results["deleted_entities"]:
+                print("🗑️  DELETED ENTITIES (Removed from original):")
+                print("-" * 60)
+                for i, entity in enumerate(results["deleted_entities"], 1):
+                    print(
+                        f"  {i}. ❌ {entity.entity_type} on " f"layer '{entity.layer}'"
+                    )
+                    pos = entity.position
+                    print(
+                        f"     📍 Position: ({pos[0]:.3f}, "
+                        f"{pos[1]:.3f}, {pos[2]:.3f})"
+                    )
+                    print(f"     🏷️  Handle: {entity.handle}")
+
+                    # Show entity-specific details
+                    details = self._format_entity_details(entity)
+                    if details:
+                        print(f"     📋 Details: {details}")
+                    print()
+                print()
+
+            # 2. ADDED ENTITIES (what was added in revision)
+            if results["new_entities"]:
+                print("📦 ADDED ENTITIES (New in revision):")
+                print("-" * 60)
+                for i, entity in enumerate(results["new_entities"], 1):
+                    print(
+                        f"  {i}. ✅ {entity.entity_type} on " f"layer '{entity.layer}'"
+                    )
+                    pos = entity.position
+                    print(
+                        f"     📍 Position: ({pos[0]:.3f}, "
+                        f"{pos[1]:.3f}, {pos[2]:.3f})"
+                    )
+                    print(f"     🏷️  Handle: {entity.handle}")
+
+                    # Show entity-specific details
+                    details = self._format_entity_details(entity)
+                    if details:
+                        print(f"     📋 Details: {details}")
+                    print()
+                print()
+
+            # 3. MODIFIED ENTITIES (what was changed between versions)
+            if results["property_changes"]:
+                print("🔄 MODIFIED ENTITIES (Changed properties):")
+                print("-" * 60)
                 for i, change in enumerate(results["property_changes"], 1):
                     print(
-                        f"  {i}. {change['entity_type']} on layer '{change['layer']}'"
+                        f"  {i}. 🔧 {change['entity_type']} on "
+                        f"layer '{change['layer']}'"
+                    )
+                    pos = change["position"]
+                    print(
+                        f"     📍 Position: ({pos[0]:.3f}, "
+                        f"{pos[1]:.3f}, {pos[2]:.3f})"
                     )
                     print(
-                        f"     Position: ({change['position'][0]:.3f}, {change['position'][1]:.3f}, {change['position'][2]:.3f})"
+                        f"     🏷️  Handles: {change['handle1']} → "
+                        f"{change['handle2']}"
                     )
-                    for prop_change in change["changes"]:
-                        print(
-                            f"     - {prop_change['property']}: {prop_change['old_value']} → {prop_change['new_value']}"
+                    print("     🔄 Changes:")
+
+                    for j, prop_change in enumerate(change["changes"], 1):
+                        old_val = self._format_value_for_display(
+                            prop_change["old_value"]
                         )
+                        new_val = self._format_value_for_display(
+                            prop_change["new_value"]
+                        )
+
+                        prop_name = prop_change["property"]
+                        if prop_name == "position":
+                            print(f"        {j}. 📍 Position moved:")
+                            print(f"           From: {old_val}")
+                            print(f"           To:   {new_val}")
+                        elif prop_name in ["text"]:
+                            print(f"        {j}. 📝 Text content changed:")
+                            print(f'           From: "{old_val}"')
+                            print(f'           To:   "{new_val}"')
+                        elif prop_name in ["radius"]:
+                            print(f"        {j}. 📏 Radius: " f"{old_val} → {new_val}")
+                        elif prop_name in ["start", "end"]:
+                            title = prop_name.title()
+                            print(
+                                f"        {j}. 📍 {title} point: "
+                                f"{old_val} → {new_val}"
+                            )
+                        elif prop_name in ["color"]:
+                            print(f"        {j}. 🎨 Color: " f"{old_val} → {new_val}")
+                        elif prop_name in ["layer"]:
+                            print(
+                                f"        {j}. 📂 Layer: " f'"{old_val}" → "{new_val}"'
+                            )
+                        elif prop_name in ["height", "char_height"]:
+                            print(
+                                f"        {j}. 📏 Text height: "
+                                f"{old_val} → {new_val}"
+                            )
+                        else:
+                            print(
+                                f"        {j}. ⚙️  {prop_name}: "
+                                f"{old_val} → {new_val}"
+                            )
                     print()
-
-            # New entities
-            if results["new_entities"]:
-                print(f"➕ NEW ENTITIES ({len(results['new_entities'])}):")
-                for i, entity in enumerate(
-                    results["new_entities"][:10], 1
-                ):  # Show first 10
-                    print(f"  {i}. {entity.entity_type} on layer '{entity.layer}'")
-                    print(
-                        f"     Position: ({entity.position[0]:.3f}, {entity.position[1]:.3f}, {entity.position[2]:.3f})"
-                    )
-                if len(results["new_entities"]) > 10:
-                    print(f"     ... and {len(results['new_entities']) - 10} more")
                 print()
 
-            # Deleted entities
-            if results["deleted_entities"]:
-                print(f"➖ DELETED ENTITIES ({len(results['deleted_entities'])}):")
-                for i, entity in enumerate(
-                    results["deleted_entities"][:10], 1
-                ):  # Show first 10
-                    print(f"  {i}. {entity.entity_type} on layer '{entity.layer}'")
-                    print(
-                        f"     Position: ({entity.position[0]:.3f}, {entity.position[1]:.3f}, {entity.position[2]:.3f})"
-                    )
-                if len(results["deleted_entities"]) > 10:
-                    print(f"     ... and {len(results['deleted_entities']) - 10} more")
-                print()
-
-        print(
-            f"Summary: {results['total_entities_file1']} entities in file 1, "
-            f"{results['total_entities_file2']} entities in file 2"
-        )
-        print("=" * 80)
+        # Enhanced summary
+        print("📊 REVISION SUMMARY:")
+        print("-" * 60)
+        print(f"   📁 Original file:  {results['total_entities_file1']} entities")
+        print(f"   📁 Revised file:   {results['total_entities_file2']} entities")
+        net_change = results["total_entities_file2"] - results["total_entities_file1"]
+        print(f"   🔢 Net change:     {net_change:+d} entities")
+        print()
+        print(f"   🗑️  Deleted:        {len(results['deleted_entities'])} entities")
+        print(f"   📦 Added:          {len(results['new_entities'])} entities")
+        print(f"   🔄 Modified:       {len(results['property_changes'])} entities")
+        print(f"   📊 Total changes:  {total_changes}")
+        print("=" * 90)
 
 
 def main():
